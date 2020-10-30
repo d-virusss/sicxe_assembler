@@ -14,8 +14,11 @@ int current_symbol_index;
 int current_format;
 int base_register = 0x0000;
 int object_code = 0x000000;
+char obj_text[10];
 char text_record[100];
 int text_count;
+int n, i, b, p, x, e, disp;
+int label_loc;
 
 FILE* open_fp;
 FILE* write_immediate;
@@ -37,7 +40,8 @@ struct OP_TABLE
     {"BYTE", 3, 1},
     {"RESW", 3, 4},
     {"RESB", 3, 3},
-    {"WORD", 3, 6}};
+    {"WORD", 3, 6},
+    {"BASE", 3, 7}};
 
 struct SYMBOL_TABLE{
   char label[10];
@@ -171,6 +175,7 @@ void cal_loc(){
         LOC += (strlen(operand) - 3) / 2; // X의 경우 1byte에 HEX 값을 저장하기 때문에 X'01'의 경우 1byte만 차지한다. 따라서 2개의 '와 X의 수인 3을 감하고 HEX 2개가 1byte이므로 2로 제한다.
       }
     }
+    else if(strcmp(opcode, "BASE") == 0) LOC += 0;
     else LOC += 3;
   }
 }
@@ -230,7 +235,7 @@ void get_obj_byte()
     }
     else{
       for(int i=2; i<strlen(operand)-2; i++){
-        if(i == (strlen(operand)))
+        if(i == strlen)
         sum += (int)operand[i];
         sum = sum << 8;
       }
@@ -248,6 +253,51 @@ void get_obj_word()
   object_code = strtoul(operand, NULL, 10);
 }
 
+bool check_use_x_register()
+{
+  if(strcmp(opcode, "LDX") == 0 || strcmp(opcode, "STX")==0 ||
+    strcmp(opcode, "TIX") == 0 ){
+    return true;
+  }
+  return false;
+}
+
+void get_immediate_disp()
+{
+  char* word;
+  word = strtok(operand, "#");
+  disp = strtol(word, NULL, 10);
+}
+
+void cal_format3()
+{
+  int tmp;
+  object_code = opcode_table[opcode_index].opcode;
+  object_code += n << 1;
+  object_code += i;
+  object_code = object_code << 16; // format3의 앞자리 hexa값 2개
+  tmp = (x<<3) + (b<<2) + (p<<1) + e;
+  tmp = tmp << 8;
+  object_code += tmp;
+  object_code += disp;
+  sprintf(obj_text, "%.6X", object_code);
+  strcat(text_record, obj_text);
+  text_count++;
+}
+
+void cal_format4()
+{
+  object_code = opcode_table[opcode_index].opcode;
+  object_code += n << 1;
+  object_code += i;
+  object_code = object_code << 24;
+  object_code += ((x<<3) + e) << 20;
+  object_code += disp;
+  sprintf(obj_text, "%.8X", object_code);
+  strcat(text_record, obj_text);
+  text_count++;
+}
+
 void header_record()
 {
   fprintf(make_obj, "H%-6s%06X%06X\n", label, strtol(operand, NULL, 16), program_len);
@@ -256,6 +306,8 @@ void header_record()
 void T_record()
 {
   text_count = 0;
+  
+  memset(text_record, 0, sizeof(text_record));
 }
 
 void end_record()
@@ -278,17 +330,26 @@ void pass2(){
   }
   while(fgets(buffer, sizeof(buffer), open_fp) != NULL)
   {
+    label_loc = 0, n = 0, i = 0, b = 0, p = 0, x = 0, e = 0, disp = 0;
     object_code = 0x000000;
+    memset(obj_text, 0, sizeof(obj_text));
     parseData(buffer);
     if(strcmp(opcode, "END") != 0 && buffer[0] != '.')
     {
+      cal_loc();
       if(current_format == 1){
         object_code = opcode_table[opcode_index].opcode;
+        sprintf(obj_text, "%2X", object_code);
+        strcat(text_record, obj_text);
+        text_count++;
       }
       else if(current_format == 2){
         object_code = opcode_table[opcode_index].opcode;
         object_code = object_code << 8;
         search_register();
+        sprintf(obj_text, "%4X", object_code);
+        strcat(text_record, obj_text);
+        text_count++;
       }
       else if(current_format == 3){
         if(strcmp(opcode, "RESW") == 0 || strcmp(opcode, "RESB") == 0){
@@ -296,13 +357,70 @@ void pass2(){
         }
         else if(strcmp(opcode, "BYTE") == 0){
           get_obj_byte();
+          sprintf(obj_text, "%.*X", strlen(operand)-3, object_code);
+          strcat(text_record, object_code);
+          text_count++;
         }
         else if(strcmp(opcode, "WORD") == 0){
           get_obj_word();
+          sprintf(obj_text, "%.6X", object_code);
+          strcat(text_record, object_code);
+          text_count++;
+        }
+        else if(strcmp(opcode, "BASE") == 0){
+          if(operand[0] == '#'){
+            get_immediate_disp();
+            base_register = disp;
+          }
+          else{
+            search_label_table(operand);
+            base_register = symbol_table[current_symbol_index].loc;
+          }
+        }
+        else if(strcmp(opcode, "RSUB") == 0){
+
+        }
+        else{
+          if(search_label_table(operand)){
+            if(check_use_x_register()) x = 1;
+            else x = 0;
+            label_loc = symbol_table[current_symbol_index].loc;
+            disp = label_loc - LOC;
+            if(disp>2047 || disp < -2048){
+              b=1;
+              disp = label_loc - base_register;
+              if(disp < 0 || disp > 4095){
+                // format3 에서 relative addressing이 전부 안되므로 error 메시지 출력
+              }
+            }
+            else p=1;
+          }
+          if(operand[0] == '@'){
+            n=1;
+          }
+          else if(operand[0] == '#'){
+            i=1;
+            get_immediate_disp();
+          }
+          cal_format3();
         }
       }
       else if(current_format == 4){
-
+        if(operand[0] == '@') n=i;
+        else if(operand[0] == '#'){
+          i=1;
+          get_immediate_disp();
+        }
+        else n=1, i=1;
+        if(check_use_x_register()) x=1;
+        else x=0;
+        e=1;
+        if(i==0){
+          if(search_label_table(operand)){
+            disp = symbol_table[current_symbol_index].loc;
+          }
+        }
+        cal_format4();
       }
       text_count++;
       if(text_count == 10 || strcmp(opcode, "RESW") == 0 || strcmp(opcode, "RESB" == 0)){
