@@ -6,7 +6,7 @@
 
 char input_file_name[50];
 char output_file_name[50];
-char label[10], opcode[10], operand[10], address[10];
+char label[15], opcode[15], operand[15], address[15];
 int LOC, start_address;
 int program_len;
 int opcode_index, symbol_count;
@@ -15,8 +15,9 @@ int current_format;
 int base_register = 0x0000;
 int object_code = 0x000000;
 char obj_text[10];
-char text_record[100];
+char text_record[150];
 int text_count;
+int text_starting_address;
 int n, i, b, p, x, e, disp;
 int label_loc;
 
@@ -51,6 +52,7 @@ struct SYMBOL_TABLE{
 struct MODIFICATION_RECORD{
   char value[10];
 } mod_record[100];
+
 
 struct REGISTER{
   char name[5];
@@ -87,12 +89,18 @@ int search_label_table(char* label){
 void search_register()
 {
   char first_register[4], second_register[4];
+  int exist_second = 0;
+  memset(first_register, 0, sizeof(first_register));
+  memset(second_register, 0, sizeof(second_register));
   char *word;
   word = strtok(operand, ", ");
   strcpy(first_register, word);
   word = strtok(NULL, " \t\n");
-  strcpy(second_register, word);
-  word = strtok(NULL, " \t\n");
+  if(word != NULL){
+    strcpy(second_register, word);
+    word = strtok(NULL, " \t\n");
+    exist_second = 1;
+  }
 
   for (int i = 0; i < 9; i++)
   {
@@ -100,9 +108,11 @@ void search_register()
     {
       object_code += (register_table[i].value << 4);
     }
-    if (strcmp(second_register, register_table[i].name) == 0)
-    {
-      object_code += register_table[i].value;
+    if(exist_second){
+      if (strcmp(second_register, register_table[i].name) == 0)
+      {
+        object_code += register_table[i].value;
+      }
     }
   }
 }
@@ -122,6 +132,7 @@ void parseData(char* line)
     if(!tmp_num) // 받아온 어절이 문자일 경우
     {
       for(int i = 0; i < strlen(word); i++){
+        if(word[0] == '+') continue;
         if(!isalpha(word[i])){
           anomaly_flag = true;
           break;
@@ -135,9 +146,15 @@ void parseData(char* line)
           if (current_format == 1 || current_format == 2)
           {
             word = strtok(NULL, " \t\n");
+            strcpy(operand, word);
           }
           else if(strcmp(opcode, "RSUB") != 0){
             word = strtok(NULL, " \t\n");
+            strcpy(operand, word);
+            if(word[strlen(word)-1] == ','){
+              word = strtok(NULL, " \t\n");
+              strcat(operand, word);
+            }
           }
         }
         else{ // word가 알파벳임에도 op_table에 없는경우는 label로 등록!
@@ -183,6 +200,7 @@ void cal_loc(){
 
 void pass1(){
   char buffer[100];
+  memset(buffer, 0, sizeof(buffer));
   while (fgets(buffer, sizeof(buffer), open_fp) != NULL)
   {
     parseData(buffer);
@@ -213,6 +231,7 @@ void pass1(){
         if(current_format != 0) cal_loc();
       }
     }
+    memset(buffer, 0, sizeof(buffer));
   }
   program_len = LOC - start_address;
 }
@@ -305,14 +324,15 @@ void header_record()
 
 void T_record()
 {
+  fprintf(make_obj, "T%.6X%.2X%s\n", text_starting_address, strlen(text_record) /2, text_record);
   text_count = 0;
-  
   memset(text_record, 0, sizeof(text_record));
+  text_starting_address = LOC;
 }
 
 void end_record()
 {
-
+  fprintf(make_obj, "E%.6X\n", start_address);
 }
 
 void write_mod_record()
@@ -323,6 +343,7 @@ void write_mod_record()
 void pass2(){
   // 1. H record
   char buffer[100];
+  text_starting_address = LOC;
   fgets(buffer, sizeof(buffer), open_fp);
   parseData(buffer);
   if(strcmp(opcode, "START") == 0){
@@ -423,11 +444,13 @@ void pass2(){
         cal_format4();
       }
       text_count++;
-      if(text_count == 10 || strcmp(opcode, "RESW") == 0 || strcmp(opcode, "RESB" == 0)){
+      if(text_count == 10){
         T_record();
       }
     }
+    memset(buffer, 0, sizeof(buffer));
   }
+  T_record();
   end_record();
   write_mod_record();
 } // + listfile 생성하기
@@ -465,11 +488,13 @@ void get_info_of_immediate(){ // immediate.txt의 시작주소, 프로그램 길
     else{
       if(search_label_table(label) == false){
         strcpy(symbol_table[symbol_count].label, label);
-        symbol_table[symbol_count].loc = LOC;
+        symbol_table[symbol_count].loc = strtol(address, NULL, 16);
         symbol_count++;
       }
     }
+    memset(buffer, 0, sizeof(buffer));
   }
+
 }
 
 void openfile(){
@@ -537,7 +562,7 @@ void check(){
 
 int main(int argc, char* argv[])
 {
-  strcpy(input_file_name, "sample.asm");
+  strcpy(input_file_name, "copy.asm");
   strcpy(output_file_name, "result.txt");
   openfile();
   pass1();
