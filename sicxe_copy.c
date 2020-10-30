@@ -35,6 +35,11 @@ struct SYMBOL_TABLE
   int loc;
 } symbol_table[200];
 
+struct MODIFICATION_RECORD
+{
+  char value[10];
+} mod_record[100];
+
 int search_opcode_table(char *word)
 {
   for (int i = 0; i < (sizeof(opcode_table) / sizeof(struct OP_TABLE)); i++)
@@ -201,8 +206,21 @@ void pass1()
   program_len = LOC - start_address;
 }
 
+void header_record()
+{
+  fprintf(make_obj, "H%-6s%06X%06X\n", label, strtol(operand, NULL, 16), program_len);
+}
+
 void pass2()
 {
+  // 1. H record
+  char buffer[100];
+  fgets(buffer, sizeof(buffer), open_fp);
+  parseData(buffer);
+  if (strcmp(opcode, "START") == 0)
+  {
+    header_record();
+  }
 }
 
 void read_immediate_line(char *line)
@@ -296,6 +314,7 @@ void set_file_pointer()
 
 void make_immediate()
 {
+  fclose(open_fp);
   write_immediate = fopen("immediate.txt", "w");
   if (write_immediate == NULL)
   {
@@ -331,14 +350,16 @@ void check()
 int main(int argc, char *argv[])
 {
   strcpy(input_file_name, "sample.asm");
-  strcpy(output_file_name, argv[2]);
+  strcpy(output_file_name, "result.txt");
   openfile();
-
   pass1();
-  make_immediate();
 
+  make_immediate();
   set_file_pointer();
-  get_info_of_immediate();
+  get_info_of_immediate(); // immediate에서 받은 정보들로 symbol table 구성
+
+  openfile();
+  pass2();
 
   printf("%s \n", input_file_name);
   printf("%s \n", output_file_name);

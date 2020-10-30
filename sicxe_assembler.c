@@ -9,9 +9,13 @@ char output_file_name[50];
 char label[10], opcode[10], operand[10], address[10];
 int LOC, start_address;
 int program_len;
-int label_count, opcode_count, symbol_count;
+int opcode_index, symbol_count;
 int current_symbol_index;
 int current_format;
+int base_register = 0x0000;
+int object_code = 0x000000;
+char text_record[100];
+int text_count;
 
 FILE* open_fp;
 FILE* write_immediate;
@@ -44,14 +48,22 @@ struct MODIFICATION_RECORD{
   char value[10];
 } mod_record[100];
 
-int search_opcode_table(char* word){
+struct REGISTER{
+  char name[5];
+  int value;
+} register_table[10] = {
+    {'A', 0}, {'X', 1}, {'L', 2}, {'PC', 8}, {'SW', 9}, {'B', 3}, {'S', 4}, {'T', 5}, {'F', 6},
+};
+
+int search_opcode_table(char *word)
+{
   for(int i=0; i< (sizeof(opcode_table) / sizeof(struct OP_TABLE)); i++){
     if(strcmp(word, opcode_table[i].name) == 0){
-      opcode_count++;
+      opcode_index++;
       return opcode_table[i].format;
     }
     else if(word[0] == '+'){
-      opcode_count++;
+      opcode_index++;
       return 4;
     }
   }
@@ -66,6 +78,29 @@ int search_label_table(char* label){
     }
   }
   return false;
+}
+
+void search_register()
+{
+  char first_register[4], second_register[4];
+  char *word;
+  word = strtok(operand, ", ");
+  strcpy(first_register, word);
+  word = strtok(NULL, " \t\n");
+  strcpy(second_register, word);
+  word = strtok(NULL, " \t\n");
+
+  for (int i = 0; i < 9; i++)
+  {
+    if (strcmp(first_register, register_table[i].name) == 0)
+    {
+      object_code += (register_table[i].value << 4);
+    }
+    if (strcmp(second_register, register_table[i].name) == 0)
+    {
+      object_code += register_table[i].value;
+    }
+  }
 }
 
 void parseData(char* line)
@@ -177,9 +212,60 @@ void pass1(){
   program_len = LOC - start_address;
 }
 
+void get_obj_byte()
+{
+  char* word;
+  int sum = 0;
+  char type[3], value[100];
+  memset(type, 0, sizeof(type));
+  memset(value, 0, sizeof(value));
+  word = strtok(operand, "'");
+  strcpy(type, word);
+  word = strtok(NULL, "'");
+  strcpy(value, word);
+  word = strtok(NULL, " \t\n");
+  if(type == 'C'){
+    if(strcmp(value, "EOF") == 0){
+      object_code = 0x454F46;
+    }
+    else{
+      for(int i=2; i<strlen(operand)-2; i++){
+        if(i == (strlen(operand)))
+        sum += (int)operand[i];
+        sum = sum << 8;
+      }
+      sum += operand[strlen(operand) - 2];
+    }
+  }
+  else if(type == 'X'){
+    object_code = strtoul(value, NULL, 16);
+  }
+}
+
+void get_obj_word()
+{
+  char* word;
+  object_code = strtoul(operand, NULL, 10);
+}
+
 void header_record()
 {
   fprintf(make_obj, "H%-6s%06X%06X\n", label, strtol(operand, NULL, 16), program_len);
+}
+
+void T_record()
+{
+  text_count = 0;
+}
+
+void end_record()
+{
+
+}
+
+void write_mod_record()
+{
+
 }
 
 void pass2(){
@@ -190,9 +276,43 @@ void pass2(){
   if(strcmp(opcode, "START") == 0){
     header_record();
   }
-  
-}
+  while(fgets(buffer, sizeof(buffer), open_fp) != NULL)
+  {
+    object_code = 0x000000;
+    parseData(buffer);
+    if(strcmp(opcode, "END") != 0 && buffer[0] != '.')
+    {
+      if(current_format == 1){
+        object_code = opcode_table[opcode_index].opcode;
+      }
+      else if(current_format == 2){
+        object_code = opcode_table[opcode_index].opcode;
+        object_code = object_code << 8;
+        search_register();
+      }
+      else if(current_format == 3){
+        if(strcmp(opcode, "RESW") == 0 || strcmp(opcode, "RESB") == 0){
+          T_record();
+        }
+        else if(strcmp(opcode, "BYTE") == 0){
+          get_obj_byte();
+        }
+        else if(strcmp(opcode, "WORD") == 0){
+          get_obj_word();
+        }
+      }
+      else if(current_format == 4){
 
+      }
+      text_count++;
+      if(text_count == 10 || strcmp(opcode, "RESW") == 0 || strcmp(opcode, "RESB" == 0)){
+        T_record();
+      }
+    }
+  }
+  end_record();
+  write_mod_record();
+} // + listfile 생성하기
 
 void read_immediate_line(char* line){
   char* word;
