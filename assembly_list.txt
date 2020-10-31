@@ -1,0 +1,54 @@
+0000		COPY      	START     		0              		
+0003		FIRST     	STL       		RETADR         		
+0006		          	LDB       		#LENGTH        		
+0006		          	          		               		
+0006		          	BASE      		LENGTH         		
+000A		CLOOP     	+JSUB     		RDREC          		
+000D		          	LDA       		LENGTH         		
+0010		          	COMP      		#0             		
+0013		          	JEQ       		ENDFIL         		
+0017		          	+JSUB     		WRREC          		
+001A		          	J         		CLOOP          		
+001D		ENDFIL    	LDA       		EOF            		
+0020		          	STA       		BUFFER         		
+0023		          	LDA       		#3             		
+0026		          	STA       		LENGTH         		
+002A		          	+JSUB     		WRREC          		
+002D		          	J         		@RETADR        		
+0030		EOF       	BYTE      		C              		
+0033		RETADR    	RESW      		1              		
+0036		LENGTH    	RESW      		1              		
+1036		BUFFER    	RESB      		4096           		
+1036		          	          		               		
+1036		          	          		               		
+1036		          	          		               		
+1038		RDREC     	CLEAR     		X              		
+103A		          	CLEAR     		A              		
+103C		          	CLEAR     		S              		
+1040		          	+LDT      		#4096          		
+1043		RLOOP     	TD        		INPUT          		
+1046		          	JEQ       		RLOOP          		
+1049		          	RD        		INPUT          		
+104B		          	COMPR     		A              		
+104E		          	JEQ       		EXIT           		
+1051		          	STCH      		BUFFER         		
+1053		          	TIXR      		T              		
+1056		          	JLT       		RLOOP          		
+1059		EXIT      	STX       		LENGTH         		
+105C		          	RSUB      		               		
+105D		INPUT     	BYTE      		X              		
+105D		          	          		               		
+105D		          	          		               		
+105D		          	          		               		
+105F		WRREC     	CLEAR     		X              		
+1062		          	LDT       		LENGTH         		
+1065		WLOOP     	TD        		OUTPUT         		
+1068		          	JEQ       		WLOOP          		
+106B		          	LDCH      		BUFFER         		
+106E		          	WD        		OUTPUT         		
+1070		          	TIXR      		T              		
+1073		          	JLT       		WLOOP          		
+1076		          	RSUB      		               		
+1077		OUTPUT    	BYTE      		X              		
+1077		          	END       		FIRST          		
+1077		          	END       		FIRST          		

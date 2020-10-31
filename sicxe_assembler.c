@@ -54,13 +54,15 @@ struct MODIFICATION_RECORD{
   char value[10];
 } mod_record[100];
 
-
 struct REGISTER{
   char name[5];
   int value;
 } register_table[10] = {
     {"A", 0}, {"X", 1}, {"L", 2}, {"PC", 8}, {"SW", 9}, {"B", 3}, {"S", 4}, {"T", 5}, {"F", 6},
 };
+
+int modification[100];
+int modification_count;
 
 int search_opcode_table(char* word)
 {
@@ -370,7 +372,6 @@ void T_record()
   fprintf(make_obj, "T%.6X%.2X%s\n", text_starting_address, strlen(text_record)/2, text_record);
   text_count = 0;
   memset(text_record, 0, sizeof(text_record));
-  text_starting_address = LOC;
 }
 
 void end_record()
@@ -380,15 +381,26 @@ void end_record()
 
 void write_mod_record()
 {
-
+  for(int i=0; i<modification_count; i++){
+    fprintf(make_obj, "M%06X05\n", modification[i]);
+  }
 }
 
 void get_flag_field()
 {
   char* tmp;
   char word[15];
+  memset(word, 0, sizeof(word));
   if(check_use_x_register()) x=1;
-  if (operand[0] == '@') n=1;
+  if (operand[0] == '@'){
+    n = 1;
+    tmp = strtok(operand, "@");
+    strcpy(word, tmp);
+    if(search_label_table(word)){
+      label_loc = symbol_table[current_symbol_index].loc;
+      disp = label_loc - LOC;
+    }
+  }
   else if (operand[0] == '#'){
     i = 1;
     get_immediate_disp();
@@ -420,6 +432,11 @@ void get_flag_field()
   else p=1;
 }
 
+void write_list_file()
+{
+  fprintf(make_list, "%04X\t\t%-10s\t%-10s\t\t%-15s\t\t\n", LOC, label, opcode, operand);
+}
+
 void pass2(){
   // 1. H record
   char buffer[100];
@@ -428,6 +445,7 @@ void pass2(){
   parseData(buffer);
   if(strcmp(opcode, "START") == 0){
     header_record();
+    write_list_file();
   }
   while(fgets(buffer, sizeof(buffer), open_fp) != NULL)
   {
@@ -436,6 +454,7 @@ void pass2(){
     memset(obj_text, 0, sizeof(obj_text));
     parseData(buffer);
     current_format = search_opcode_table(opcode);
+    if(text_count == 0) text_starting_address = LOC;
     if(strcmp(opcode, "END") != 0 && buffer[0] != '.')
     {
       cal_loc();
@@ -498,19 +517,27 @@ void pass2(){
         if(n==1){
           if(search_label_table(operand)){
             disp = symbol_table[current_symbol_index].loc;
+            modification[modification_count] = LOC - 3;
+            modification_count++;
           }
         }
         cal_format4();
+        if(n==0 && i ==1 && operand_label_flag == 1){
+          modification[modification_count] = LOC -3;
+          modification_count++;
+        }
       }
       if(strlen(text_record) / 2 == 29){
         T_record();
       }
     }
     memset(buffer, 0, sizeof(buffer));
+    write_list_file();
   }
+  write_list_file();
   T_record();
-  end_record();
   write_mod_record();
+  end_record();
 } // + listfile 생성하기
 
 void read_immediate_line(char* line){
