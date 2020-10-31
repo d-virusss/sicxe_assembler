@@ -20,6 +20,7 @@ int text_count;
 int text_starting_address;
 int n, i, b, p, x, e, disp;
 int label_loc;
+int operand_label_flag = 0;
 
 FILE* open_fp;
 FILE* write_immediate;
@@ -58,21 +59,27 @@ struct REGISTER{
   char name[5];
   int value;
 } register_table[10] = {
-    {'A', 0}, {'X', 1}, {'L', 2}, {'PC', 8}, {'SW', 9}, {'B', 3}, {'S', 4}, {'T', 5}, {'F', 6},
+    {"A", 0}, {"X", 1}, {"L", 2}, {"PC", 8}, {"SW", 9}, {"B", 3}, {"S", 4}, {"T", 5}, {"F", 6},
 };
 
-int search_opcode_table(char *word)
+int search_opcode_table(char* word)
 {
+  opcode_index = 0;
+  int e_flag = 0;
   for(int i=0; i< (sizeof(opcode_table) / sizeof(struct OP_TABLE)); i++){
     if(strcmp(word, opcode_table[i].name) == 0){
-      opcode_index++;
       return opcode_table[i].format;
     }
     else if(word[0] == '+'){
+      e_flag = 1;
       opcode_index++;
-      return 4;
+    }
+    else{
+      opcode_index++;
     }
   }
+
+  if(e_flag) return 4;
   return false;
 }
 
@@ -141,14 +148,14 @@ void parseData(char* line)
       if(anomaly_flag == false){ // 알파벳일 경우에만 진행, comment인 경우에는 큰 for문 반복하며 빠져나감
         current_format = search_opcode_table(word);
         if (current_format > 0)
-        {
+        { // opcode_table에 있는 instruction일 경우
           strcpy(opcode, word);
           if (current_format == 1 || current_format == 2)
           {
             word = strtok(NULL, " \t\n");
             strcpy(operand, word);
           }
-          else if(strcmp(opcode, "RSUB") != 0){
+          else if(strcmp(opcode, "RSUB") != 0){ //
             word = strtok(NULL, " \t\n");
             strcpy(operand, word);
             if(word[strlen(word)-1] == ','){
@@ -248,7 +255,7 @@ void get_obj_byte()
   word = strtok(NULL, "'");
   strcpy(value, word);
   word = strtok(NULL, " \t\n");
-  if(type == 'C'){
+  if(type[0] == 'C'){
     if(strcmp(value, "EOF") == 0){
       object_code = 0x454F46;
     }
@@ -260,9 +267,12 @@ void get_obj_byte()
       }
       sum += operand[strlen(operand) - 2];
     }
+    sprintf(obj_text, "%.*X", strlen(operand) - 3, object_code);
+    strcat(text_record, obj_text);
+    text_count++;
   }
-  else if(type == 'X'){
-    object_code = strtoul(value, NULL, 16);
+  else if(type[0] == 'X'){
+    strcat(text_record, value);
   }
 }
 
@@ -274,8 +284,7 @@ void get_obj_word()
 
 bool check_use_x_register()
 {
-  if(strcmp(opcode, "LDX") == 0 || strcmp(opcode, "STX")==0 ||
-    strcmp(opcode, "TIX") == 0 ){
+  if((operand[strlen(operand)-2] == ',' && operand[strlen(operand)-1] == 'X') ){
     return true;
   }
   return false;
@@ -284,19 +293,35 @@ bool check_use_x_register()
 void get_immediate_disp()
 {
   char* word;
+  operand_label_flag = 0;
   word = strtok(operand, "#");
-  disp = strtol(word, NULL, 10);
+  for(int i=0; i<strlen(word); i++){
+    if(!isdigit(word[i])){ // 전부 숫자가 아니면 label로 판단
+      operand_label_flag = 1;
+    }
+  }
+  if(operand_label_flag){
+    search_label_table(word);
+    disp = symbol_table[current_symbol_index].loc;
+  }
+  else{ // 숫자일 경우에는 그대로 읽어서 disp에 저장, 10진수로 읽어야함!
+    disp = strtol(word, NULL, 10);
+  }
 }
 
 void cal_format3()
 {
   int tmp;
+  int binary = 0b111111111111;
+  if(p==1 && disp < 0){
+    disp = disp&binary;
+  }
   object_code = opcode_table[opcode_index].opcode;
   object_code += n << 1;
   object_code += i;
   object_code = object_code << 16; // format3의 앞자리 hexa값 2개
   tmp = (x<<3) + (b<<2) + (p<<1) + e;
-  tmp = tmp << 8;
+  tmp = tmp << 12;
   object_code += tmp;
   object_code += disp;
   sprintf(obj_text, "%.6X", object_code);
@@ -304,8 +329,26 @@ void cal_format3()
   text_count++;
 }
 
+void get_format4_opcode()
+{
+  opcode_index = 0;
+  char* word;
+  word = strtok(opcode, "+");
+  for (int i = 0; i < (sizeof(opcode_table) / sizeof(struct OP_TABLE)); i++){
+    if (strcmp(word, opcode_table[i].name) == 0)
+    {
+      return;
+    }
+    else
+    {
+      opcode_index++;
+    }
+  }
+}
+
 void cal_format4()
 {
+  get_format4_opcode();
   object_code = opcode_table[opcode_index].opcode;
   object_code += n << 1;
   object_code += i;
@@ -324,7 +367,7 @@ void header_record()
 
 void T_record()
 {
-  fprintf(make_obj, "T%.6X%.2X%s\n", text_starting_address, strlen(text_record) /2, text_record);
+  fprintf(make_obj, "T%.6X%.2X%s\n", text_starting_address, strlen(text_record)/2, text_record);
   text_count = 0;
   memset(text_record, 0, sizeof(text_record));
   text_starting_address = LOC;
@@ -340,6 +383,43 @@ void write_mod_record()
 
 }
 
+void get_flag_field()
+{
+  char* tmp;
+  char word[15];
+  if(check_use_x_register()) x=1;
+  if (operand[0] == '@') n=1;
+  else if (operand[0] == '#'){
+    i = 1;
+    get_immediate_disp();
+  }
+  else n=1, i=1;
+  
+  if(n==1 && i==1 && x==0){
+    if(search_label_table(operand)){
+      label_loc = symbol_table[current_symbol_index].loc;
+      disp = label_loc - LOC;
+    }
+  }
+  if(n==1 && i==1 && x==1){
+    tmp = strtok(operand, ",");
+    strcpy(word, tmp);
+    if(search_label_table(word)){
+      label_loc = symbol_table[current_symbol_index].loc;
+      disp = label_loc - LOC;
+    }
+  }
+  if (disp > 2047 || disp < -2048){
+    p=0, b=1;
+    disp = label_loc - base_register;
+    if (disp < 0 || disp > 4095){
+      // format3 에서 relative addressing이 전부 안되므로 error 메시지 출력
+    }
+  }
+  else if(n==0 && i==i && operand_label_flag == 0) p=0;
+  else p=1;
+}
+
 void pass2(){
   // 1. H record
   char buffer[100];
@@ -351,10 +431,11 @@ void pass2(){
   }
   while(fgets(buffer, sizeof(buffer), open_fp) != NULL)
   {
-    label_loc = 0, n = 0, i = 0, b = 0, p = 0, x = 0, e = 0, disp = 0;
+    label_loc = 0, n = 0, i = 0, b = 0, p = 0, x = 0, e = 0, disp = 0, current_format=0;
     object_code = 0x000000;
     memset(obj_text, 0, sizeof(obj_text));
     parseData(buffer);
+    current_format = search_opcode_table(opcode);
     if(strcmp(opcode, "END") != 0 && buffer[0] != '.')
     {
       cal_loc();
@@ -374,18 +455,15 @@ void pass2(){
       }
       else if(current_format == 3){
         if(strcmp(opcode, "RESW") == 0 || strcmp(opcode, "RESB") == 0){
-          T_record();
+          if(text_count != 0) T_record();
         }
         else if(strcmp(opcode, "BYTE") == 0){
           get_obj_byte();
-          sprintf(obj_text, "%.*X", strlen(operand)-3, object_code);
-          strcat(text_record, object_code);
-          text_count++;
         }
         else if(strcmp(opcode, "WORD") == 0){
           get_obj_word();
           sprintf(obj_text, "%.6X", object_code);
-          strcat(text_record, object_code);
+          strcat(text_record, obj_text);
           text_count++;
         }
         else if(strcmp(opcode, "BASE") == 0){
@@ -399,30 +477,11 @@ void pass2(){
           }
         }
         else if(strcmp(opcode, "RSUB") == 0){
-
+          n=1, i=1; // memory reference가 없으므로, x,b,p는 전부 0, format3이므로 e=0
+          cal_format3();
         }
         else{
-          if(search_label_table(operand)){
-            if(check_use_x_register()) x = 1;
-            else x = 0;
-            label_loc = symbol_table[current_symbol_index].loc;
-            disp = label_loc - LOC;
-            if(disp>2047 || disp < -2048){
-              b=1;
-              disp = label_loc - base_register;
-              if(disp < 0 || disp > 4095){
-                // format3 에서 relative addressing이 전부 안되므로 error 메시지 출력
-              }
-            }
-            else p=1;
-          }
-          if(operand[0] == '@'){
-            n=1;
-          }
-          else if(operand[0] == '#'){
-            i=1;
-            get_immediate_disp();
-          }
+          get_flag_field();
           cal_format3();
         }
       }
@@ -436,15 +495,14 @@ void pass2(){
         if(check_use_x_register()) x=1;
         else x=0;
         e=1;
-        if(i==0){
+        if(n==1){
           if(search_label_table(operand)){
             disp = symbol_table[current_symbol_index].loc;
           }
         }
         cal_format4();
       }
-      text_count++;
-      if(text_count == 10){
+      if(strlen(text_record) / 2 == 29){
         T_record();
       }
     }
