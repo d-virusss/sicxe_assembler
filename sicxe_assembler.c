@@ -707,8 +707,5 @@ int main(int argc, char* argv[])
   openfile();
   pass2();
 
-  printf("%s \n", input_file_name);
-  printf("%s \n", output_file_name);
-
   return 0;
 }
