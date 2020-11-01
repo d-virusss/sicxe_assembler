@@ -171,7 +171,14 @@ void parseData(char* line)
           word = strtok(NULL, " \t\n");
           strcpy(opcode, word);
           word = strtok(NULL, " \t\n");
-          strcpy(operand, word);
+          if(word == NULL){
+            strcpy(operand, opcode);
+            strcpy(opcode, label);
+            memset(label, 0, sizeof(label));
+          }
+          else{
+            strcpy(operand, word);
+          }
         }
       }
     }
@@ -206,6 +213,30 @@ void cal_loc(){
   }
 }
 
+void header_record()
+{
+  fprintf(make_obj, "H%-6s%06X%06X\n", label, strtol(operand, NULL, 16), program_len);
+}
+
+void T_record()
+{
+  fprintf(make_obj, "T%.6X%.2X%s\n", text_starting_address, strlen(text_record) / 2, text_record);
+  text_count = 0;
+  memset(text_record, 0, sizeof(text_record));
+}
+
+void end_record()
+{
+  fprintf(make_obj, "E%.6X\n", start_address);
+}
+
+void write_mod_record()
+{
+  for (int i = 0; i < modification_count; i++)
+  {
+    fprintf(make_obj, "M%06X05\n", modification[i]);
+  }
+}
 
 void pass1(){
   char buffer[100];
@@ -233,11 +264,17 @@ void pass1(){
             symbol_count++;
           }
           else{ // label이 symbol_table에 이미 있는 경우
-            printf("label is already exist in symbol table...\n");
+            fprintf(make_list, "\t\tIN LOC : %04X\t\tDUPLICATE SYMBOL ERROR!! : %-10s is duplicated..\n", prev_LOC, label);
           }
         }
         current_format = search_opcode_table(opcode);
-        if(current_format != 0) cal_loc();
+        if(current_format != 0){
+          prev_LOC = LOC;
+          cal_loc();
+        }
+        else if(current_format == 0 && (strcmp(opcode, "") != 0) ){ // opcode가 opcode_table에 존재하지 않을 때
+          fprintf(make_list, "\t\tIN LOC : %04X\t\tINVALID OPERATION CODE ERROR!! : %-10s is invalid operation code..\n", prev_LOC, opcode);
+        }
       }
     }
     memset(buffer, 0, sizeof(buffer));
@@ -301,14 +338,19 @@ void get_immediate_disp()
   char* word;
   operand_label_flag = 0;
   word = strtok(operand, "#");
+  if(x==1) word = strtok(word, ",");
   for(int i=0; i<strlen(word); i++){
     if(!isdigit(word[i])){ // 전부 숫자가 아니면 label로 판단
       operand_label_flag = 1;
     }
   }
   if(operand_label_flag){
-    search_label_table(word);
-    disp = symbol_table[current_symbol_index].loc;
+    if(search_label_table(word)){
+      disp = symbol_table[current_symbol_index].loc;
+    }
+    else{
+      fprintf(make_list, "\t\tUNDEFINED SYMBOL ERROR!! : %-10s is undefined symbol..\n", word);
+    }
   }
   else{ // 숫자일 경우에는 그대로 읽어서 disp에 저장, 10진수로 읽어야함!
     disp = strtol(word, NULL, 10);
@@ -366,31 +408,7 @@ void cal_format4()
   text_count++;
 }
 
-void header_record()
-{
-  fprintf(make_obj, "H%-6s%06X%06X\n", label, strtol(operand, NULL, 16), program_len);
-}
-
-void T_record()
-{
-  fprintf(make_obj, "T%.6X%.2X%s\n", text_starting_address, strlen(text_record)/2, text_record);
-  text_count = 0;
-  memset(text_record, 0, sizeof(text_record));
-}
-
-void end_record()
-{
-  fprintf(make_obj, "E%.6X\n", start_address);
-}
-
-void write_mod_record()
-{
-  for(int i=0; i<modification_count; i++){
-    fprintf(make_obj, "M%06X05\n", modification[i]);
-  }
-}
-
-void get_flag_field()
+void get_flag_field() // format3의 flat field bits assign
 {
   char* tmp;
   char word[15];
@@ -404,10 +422,16 @@ void get_flag_field()
       label_loc = symbol_table[current_symbol_index].loc;
       disp = label_loc - LOC;
     }
+    else{
+      fprintf(make_list, "\t\tUNDEFINED SYMBOL ERROR!! : %-10s is undefined symbol..\n", word);
+    }
   }
   else if (operand[0] == '#'){
     i = 1;
-    get_immediate_disp();
+    get_immediate_disp(); // disp에 label의 주소값(=TA) assign
+    if(operand_label_flag){
+      disp -= LOC;
+    }
   }
   else n=1, i=1;
   
@@ -415,6 +439,9 @@ void get_flag_field()
     if(search_label_table(operand)){
       label_loc = symbol_table[current_symbol_index].loc;
       disp = label_loc - LOC;
+    }
+    else{
+      fprintf(make_list, "\t\tUNDEFINED SYMBOL ERROR!! : %-10s is undefined symbol..\n", operand);
     }
   }
   if(n==1 && i==1 && x==1){
@@ -424,12 +451,16 @@ void get_flag_field()
       label_loc = symbol_table[current_symbol_index].loc;
       disp = label_loc - LOC;
     }
+    else{
+      fprintf(make_list, "\t\tUNDEFINED SYMBOL ERROR!! : %-10s is undefined symbol..\n", word);
+    }
   }
   if (disp > 2047 || disp < -2048){
     p=0, b=1;
     disp = label_loc - base_register;
     if (disp < 0 || disp > 4095){
-      // format3 에서 relative addressing이 전부 안되므로 error 메시지 출력
+      // format3 에서 relative addressing이 전부 안되므로 ERROR!! 메시지 출력
+      fprintf(make_list, "\t\tFORMAT3 ADDRESSING ERROR!! : disp is too large to express in 12bits address field..\n");
     }
   }
   else if(n==0 && i==i && operand_label_flag == 0) p=0;
@@ -438,13 +469,20 @@ void get_flag_field()
 
 void write_list_file()
 {
-  fprintf(make_list, "%04X\t\t%-10s\t%-10s\t\t%-15s\t%-10s\n", prev_LOC, label, opcode, operand, obj_text);
+  if(strcmp(opcode, "") == 0) return;
+  else if(strcmp(opcode, "BASE") == 0 || strcmp(opcode, "END") == 0){
+    fprintf(make_list, "    \t\t%-10s\t%-10s\t\t%-15s\t%-10s\n", label, opcode, operand, obj_text);
+  }
+  else{
+    fprintf(make_list, "%04X\t\t%-10s\t%-10s\t\t%-15s\t%-10s\n", prev_LOC, label, opcode, operand, obj_text);
+  }
 }
 
 void pass2(){
   // 1. H record
   char buffer[100];
   text_starting_address = LOC;
+  prev_LOC = LOC;
   fgets(buffer, sizeof(buffer), open_fp);
   parseData(buffer);
   if(strcmp(opcode, "START") == 0){
@@ -496,8 +534,12 @@ void pass2(){
             base_register = disp;
           }
           else{
-            search_label_table(operand);
-            base_register = symbol_table[current_symbol_index].loc;
+            if(search_label_table(operand)){
+              base_register = symbol_table[current_symbol_index].loc;
+            }
+            else{
+              fprintf(make_list, "\t\tUNDEFINED SYMBOL ERROR!! : %-10s is undefined symbol..\n", operand);
+            }
           }
         }
         else if(strcmp(opcode, "RSUB") == 0){
@@ -510,20 +552,22 @@ void pass2(){
         }
       }
       else if(current_format == 4){
+        if (check_use_x_register()) x = 1;
         if(operand[0] == '@') n=i;
         else if(operand[0] == '#'){
           i=1;
           get_immediate_disp();
         }
         else n=1, i=1;
-        if(check_use_x_register()) x=1;
-        else x=0;
         e=1;
         if(n==1){
           if(search_label_table(operand)){
             disp = symbol_table[current_symbol_index].loc;
             modification[modification_count] = LOC - 3;
             modification_count++;
+          }
+          else{
+            fprintf(make_list, "\t\tUNDEFINED SYMBOL ERROR!! : %-10s is undefined symbol..\n", operand);
           }
         }
         cal_format4();
@@ -539,11 +583,10 @@ void pass2(){
     memset(buffer, 0, sizeof(buffer));
     write_list_file();
   }
-  write_list_file();
   T_record();
   write_mod_record();
   end_record();
-} // + listfile 생성하기
+}
 
 void read_immediate_line(char* line){
   char* word;
@@ -652,13 +695,13 @@ void check(){
 
 int main(int argc, char* argv[])
 {
-  strcpy(input_file_name, "copy.asm");
-  strcpy(output_file_name, "result.txt");
+  strcpy(input_file_name, argv[1]);
+  strcpy(output_file_name, argv[2]);
   openfile();
+  set_file_pointer();
   pass1();
 
   make_immediate();
-  set_file_pointer();
   get_info_of_immediate(); // immediate에서 받은 정보들로 symbol table 구성
   
   openfile();
