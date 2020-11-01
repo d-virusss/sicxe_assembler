@@ -7,7 +7,7 @@
 char input_file_name[50];
 char output_file_name[50];
 char label[15], opcode[15], operand[15], address[15];
-int LOC, start_address;
+int LOC, prev_LOC, start_address;
 int program_len;
 int opcode_index, symbol_count;
 int current_symbol_index;
@@ -248,6 +248,8 @@ void pass1(){
 void get_obj_byte()
 {
   char* word;
+  char origin_operand[10];
+  strcpy(origin_operand, operand);
   int sum = 0;
   char type[3], value[100];
   memset(type, 0, sizeof(type));
@@ -274,8 +276,10 @@ void get_obj_byte()
     text_count++;
   }
   else if(type[0] == 'X'){
-    strcat(text_record, value);
+    strcpy(obj_text, value);
+    strcat(text_record, obj_text);
   }
+  strcpy(operand, origin_operand);
 }
 
 void get_obj_word()
@@ -434,7 +438,7 @@ void get_flag_field()
 
 void write_list_file()
 {
-  fprintf(make_list, "%04X\t\t%-10s\t%-10s\t\t%-15s\t\t\n", LOC, label, opcode, operand);
+  fprintf(make_list, "%04X\t\t%-10s\t%-10s\t\t%-15s\t%-10s\n", prev_LOC, label, opcode, operand, obj_text);
 }
 
 void pass2(){
@@ -457,6 +461,7 @@ void pass2(){
     if(text_count == 0) text_starting_address = LOC;
     if(strcmp(opcode, "END") != 0 && buffer[0] != '.')
     {
+      prev_LOC = LOC;
       cal_loc();
       if(current_format == 1){
         object_code = opcode_table[opcode_index].opcode;
